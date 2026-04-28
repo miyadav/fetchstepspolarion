@@ -72,10 +72,45 @@ def to_workitem_keyed(results):
 
 
 def load_from_file(filepath):
-    """Load previously fetched results from a JSON file."""
+    """Load previously fetched results from a JSON file.
+
+    Accepts either flat format {"results": [...]} or workitem-keyed
+    format {"OCP-12345": {"steps": [...]}, ...}.
+    Returns (results_list_or_none, workitem_keyed_dict_or_none).
+    """
     with open(filepath) as f:
         data = json.load(f)
-    return data.get("results", [])
+    if "results" in data:
+        return data["results"], None
+    # Already workitem-keyed
+    return None, data
+
+
+def _log(msg, verbose=False):
+    if verbose:
+        print(msg, file=sys.stderr)
+
+
+def _write_story(workitem_data, story_path, verbose=False):
+    from generate_story import generate_story
+    _log("\n" + "=" * 60, verbose)
+    _log("STORY GENERATION", verbose)
+    _log("=" * 60, verbose)
+    md = generate_story(workitem_data, verbose=verbose)
+    with open(story_path, "w") as f:
+        f.write(md + "\n")
+    print(f"Generated story -> {story_path}", file=sys.stderr)
+
+
+def _write_redundancy_report(workitem_data, report_path, verbose=False):
+    from analyze_redundancy import analyze_redundancy
+    _log("\n" + "=" * 60, verbose)
+    _log("REDUNDANCY ANALYSIS", verbose)
+    _log("=" * 60, verbose)
+    report = analyze_redundancy(workitem_data, verbose=verbose)
+    with open(report_path, "w") as f:
+        f.write(report + "\n")
+    print(f"Generated redundancy report -> {report_path}", file=sys.stderr)
 
 
 def main():
@@ -91,22 +126,48 @@ def main():
     parser.add_argument("--no-verify-ssl", action="store_true", help="Disable SSL certificate verification")
     parser.add_argument("--output", "-o", help="Write JSON output to file instead of stdout")
     parser.add_argument("--from-file", help="Transform an existing results JSON file instead of fetching from API")
+    parser.add_argument("--story", metavar="FILE", help="Also generate a narrative Markdown story to FILE")
+    parser.add_argument("--analyze", metavar="FILE", help="Also generate a redundancy analysis report to FILE")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed step-by-step progress on stderr")
     args = parser.parse_args()
+    verbose = args.verbose
 
     # -- Mode 1: Transform existing file --
     if args.from_file:
-        results = load_from_file(args.from_file)
-        if args.flat:
-            output = {"results": results}
+        results, wk_data = load_from_file(args.from_file)
+
+        if wk_data is not None:
+            # Already workitem-keyed
+            output = wk_data
+            count = len(wk_data)
+            _log(f"Loaded {count} work items (workitem-keyed format)", verbose)
+            if verbose:
+                for wid, info in wk_data.items():
+                    n = len(info.get("steps", []))
+                    _log(f"  {wid}: {n} steps", verbose)
         else:
-            output = to_workitem_keyed(results)
+            count = len(results)
+            _log(f"Loaded {count} work items (flat format)", verbose)
+            if args.flat:
+                output = {"results": results}
+            else:
+                output = to_workitem_keyed(results)
+                if verbose:
+                    for wid, info in output.items():
+                        n = len(info.get("steps", []))
+                        _log(f"  {wid}: {n} steps", verbose)
+
         json_out = json.dumps(output, indent=2, ensure_ascii=False)
         if args.output:
             with open(args.output, "w") as f:
                 f.write(json_out + "\n")
-            print(f"Converted {len(results)} work items -> {args.output}", file=sys.stderr)
+            print(f"Converted {count} work items -> {args.output}", file=sys.stderr)
         else:
             print(json_out)
+        if args.story and not args.flat:
+            _write_story(output, args.story, verbose)
+        if args.analyze and not args.flat:
+            _write_redundancy_report(output, args.analyze, verbose)
         return
 
     # -- Mode 2: Fetch from Polarion API --
@@ -126,17 +187,34 @@ def main():
     results = []
     errors = []
 
-    for wid in args.test_ids:
+    total = len(args.test_ids)
+    _log("=" * 60, verbose)
+    _log("FETCHING TEST STEPS", verbose)
+    _log("=" * 60, verbose)
+
+    for idx, wid in enumerate(args.test_ids, 1):
+        _log(f"  [{idx}/{total}] Fetching {wid} ...", verbose)
         try:
             raw = fetch_teststeps(base_url, args.project, wid, token, verify_ssl)
             if args.raw:
                 results.append({"workItemId": wid, "response": raw})
+                _log(f"           raw response saved", verbose)
             else:
-                results.append(parse_teststeps(raw, wid))
+                parsed = parse_teststeps(raw, wid)
+                results.append(parsed)
+                step_count = len(parsed.get("testSteps", []))
+                _log(f"           {step_count} steps fetched", verbose)
+                if verbose:
+                    for si, s in enumerate(parsed.get("testSteps", []), 1):
+                        step_text = s.get("step", "")[:80]
+                        has_exp = bool(s.get("expectedResult", "").strip())
+                        _log(f"           step {si}: {step_text}..." + (" [+expected]" if has_exp else ""), verbose)
         except requests.HTTPError as e:
             errors.append({"workItemId": wid, "error": str(e), "status": e.response.status_code})
+            _log(f"           ERROR: {e.response.status_code} {e}", verbose)
         except requests.RequestException as e:
             errors.append({"workItemId": wid, "error": str(e)})
+            _log(f"           ERROR: {e}", verbose)
 
     if args.flat or args.raw:
         output = {"results": results}
@@ -155,6 +233,11 @@ def main():
         print(f"Fetched {len(results)} work items -> {args.output}", file=sys.stderr)
     else:
         print(json_out)
+
+    if args.story and not (args.flat or args.raw):
+        _write_story(output, args.story, verbose)
+    if args.analyze and not (args.flat or args.raw):
+        _write_redundancy_report(output, args.analyze, verbose)
 
     if errors:
         print(f"WARNING: {len(errors)} work item(s) failed", file=sys.stderr)
