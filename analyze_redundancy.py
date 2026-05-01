@@ -1,16 +1,5 @@
 #!/usr/bin/env python3
-"""Analyze work item test steps for redundancy and similarity.
-
-Uses the story paragraphs from generate_story to compare work items via
-normalized text similarity, keyword overlap, and step-level matching.
-
-Standalone:
-    python3 analyze_redundancy.py /path/to/teststeps_by_workitem.json -o report.md -v
-
-Importable:
-    from analyze_redundancy import analyze_redundancy
-    report_md = analyze_redundancy(data_dict, verbose=True)
-"""
+"""Analyze work item test steps for redundancy and similarity."""
 
 import argparse
 import json
@@ -97,17 +86,6 @@ def _describe_group(group_wids, data):
 
 
 def analyze_redundancy(data, similarity_threshold=0.25, verbose=False):
-    """Return a Markdown redundancy report.
-
-    Parameters
-    ----------
-    data : dict
-        Workitem-keyed dict, e.g. {"OCP-12345": {"steps": [...]}, ...}.
-    similarity_threshold : float
-        Minimum combined score to flag a pair.
-    verbose : bool
-        Log per-workitem keywords and per-pair comparison detail to stderr.
-    """
     paragraphs = {}
     keywords = {}
 
@@ -137,7 +115,7 @@ def analyze_redundancy(data, similarity_threshold=0.25, verbose=False):
             text_sim = SequenceMatcher(None, paragraphs[w1], paragraphs[w2]).ratio()
             kw_sim = _jaccard(keywords[w1], keywords[w2])
 
-            # Quick skip: if text + keyword alone can't reach threshold, skip expensive step comparison
+            # Skip pairs that can't reach threshold even with perfect step match
             if 0.30 * text_sim + 0.35 * kw_sim + 0.35 * 1.0 < similarity_threshold:
                 continue
 
@@ -211,7 +189,6 @@ def analyze_redundancy(data, similarity_threshold=0.25, verbose=False):
 
     _log(f"\n  Phase 4: Generating report ...", verbose)
 
-    # Markdown report
     lines = []
     lines.append("# Test Steps Redundancy Analysis Report")
     lines.append("")
@@ -236,7 +213,6 @@ def analyze_redundancy(data, similarity_threshold=0.25, verbose=False):
         lines.append(_describe_group(members, data))
         lines.append("")
 
-    # Detailed pairs
     lines.append("---")
     lines.append("")
     lines.append("## Detailed Pair Analysis")
@@ -281,7 +257,6 @@ def analyze_redundancy(data, similarity_threshold=0.25, verbose=False):
                 lines.append(f"  matches Step {idx_b+1}: `{sb}...`")
             lines.append("")
 
-    # Recommendations
     lines.append("---")
     lines.append("")
     lines.append("## Recommendations")

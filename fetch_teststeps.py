@@ -1,17 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch test steps from Polarion, generate story narratives, and analyze redundancy.
-
-Usage:
-    python3 fetch_teststeps.py OCP-23144 OCP-23143 OCP-88225 \
-        --base-url https://polarion.engineering.redhat.com \
-        --project OSE \
-        --token "$POLARION_TOKEN" \
-        --no-verify-ssl \
-        -o teststeps_by_workitem.json \
-        --story teststeps_story.md \
-        --analyze redundancy_report.md \
-        --verbose
-"""
+"""Fetch test steps from Polarion, generate story narratives, and analyze redundancy."""
 
 import argparse
 import json

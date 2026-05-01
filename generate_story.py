@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""Generate narrative paragraphs from workitem-keyed test steps JSON.
-
-Can be used standalone:
-    python3 generate_story.py /path/to/teststeps_by_workitem.json -o story.md
-
-Or imported and called from other modules:
-    from generate_story import generate_story
-    markdown = generate_story(data_dict, verbose=True)
-"""
+"""Generate narrative paragraphs from workitem-keyed test steps JSON."""
 
 import argparse
 import json
@@ -52,15 +44,6 @@ def _build_paragraph(work_item_id, steps):
 
 
 def generate_story(data, verbose=False):
-    """Return a Markdown string with one labelled paragraph per work item.
-
-    Parameters
-    ----------
-    data : dict
-        Workitem-keyed dict, e.g. {"OCP-12345": {"steps": [...]}, ...}.
-    verbose : bool
-        Log per-workitem and per-step detail to stderr.
-    """
     sections = []
     total = len(data)
     generated = 0
