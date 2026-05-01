@@ -189,6 +189,8 @@ def analyze_redundancy(data, similarity_threshold=0.25, verbose=False):
 
     _log(f"\n  Phase 4: Generating report ...", verbose)
 
+    HIGH, MED = 0.40, 0.30
+
     lines = []
     lines.append("# Test Steps Redundancy Analysis Report")
     lines.append("")
@@ -196,6 +198,47 @@ def analyze_redundancy(data, similarity_threshold=0.25, verbose=False):
     lines.append(f"- **Similar pairs found:** {len(pairs)}")
     lines.append(f"- **Redundancy clusters:** {len(cluster_groups)}")
     lines.append(f"- **Unique (no overlap):** {unique_count}")
+    lines.append("")
+
+    lines.append("---")
+    lines.append("")
+    lines.append("## How to Read This Report")
+    lines.append("")
+    lines.append("Each pair of work items is scored on three independent axes, then")
+    lines.append("combined into a single similarity percentage:")
+    lines.append("")
+    lines.append("| Metric | Weight | What It Measures |")
+    lines.append("|--------|--------|------------------|")
+    lines.append("| Text similarity | 30% | Character-level overlap of the full normalized test narrative |")
+    lines.append("| Keyword overlap | 35% | Jaccard similarity of domain keywords (stop-words removed) |")
+    lines.append("| Step-level match | 35% | Fraction of steps in the smaller item that align (>55% match) to a step in the larger item |")
+    lines.append("")
+    lines.append("**Combined = 0.30 x Text + 0.35 x Keyword + 0.35 x Step-match**")
+    lines.append("")
+    lines.append("#### Interpreting a ~50% combined score")
+    lines.append("")
+    lines.append("A pair at 50% similarity is a strong signal of redundancy but not a")
+    lines.append("guaranteed duplicate. In practice this means roughly half the testing")
+    lines.append("effort overlaps. Look at:")
+    lines.append("")
+    lines.append("1. **Step-level match count** (e.g. `7/8 steps`): shows how many")
+    lines.append("   individual steps found a close counterpart. A high ratio here")
+    lines.append("   means one test is nearly a subset of the other, even if the")
+    lines.append("   wording differs enough to lower the text score.")
+    lines.append("2. **Matched steps list**: each line shows which step in item A maps")
+    lines.append("   to which step in item B, with a per-step similarity percentage.")
+    lines.append("   Steps below 65% are loose matches (similar intent, different")
+    lines.append("   detail); steps above 85% are near-duplicates.")
+    lines.append("3. **Keyword overlap vs text similarity gap**: a high keyword score")
+    lines.append("   with a low text score means both tests work in the same domain")
+    lines.append("   but phrase instructions differently — review whether they actually")
+    lines.append("   verify different behavior or just use different wording.")
+    lines.append("")
+    lines.append("#### Verdict thresholds")
+    lines.append("")
+    lines.append(f"- **HIGH (>= {HIGH:.0%})**: strong candidate to merge or remove one")
+    lines.append(f"- **MEDIUM ({MED:.0%} -- {HIGH:.0%})**: review for partial overlap")
+    lines.append(f"- **LOW (< {MED:.0%})**: minor overlap, likely distinct tests")
     lines.append("")
 
     # Clusters
@@ -219,8 +262,6 @@ def analyze_redundancy(data, similarity_threshold=0.25, verbose=False):
     lines.append("")
     lines.append("Pairs ranked by combined similarity score (text + keyword + step-level).")
     lines.append("")
-
-    HIGH, MED = 0.40, 0.30
 
     for rank, p in enumerate(pairs, 1):
         score = p["combined"]
