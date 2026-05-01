@@ -4,9 +4,10 @@ Fetch test steps from Polarion, generate readable narratives, and detect redunda
 
 ## Prerequisites
 
-- Python 3.8+
-- `pip install requests`
-- Polarion personal access token (`--token` or `POLARION_TOKEN` env var)
+- **Python 3.8+** (tested with 3.10 and 3.11)
+- Install the only external dependency: `pip install requests`
+- A valid Polarion personal access token, passed via `--token` or the `POLARION_TOKEN` environment variable
+- No database or additional services required — the tool runs entirely as a local CLI and talks directly to the Polarion REST API
 
 ## Usage
 
