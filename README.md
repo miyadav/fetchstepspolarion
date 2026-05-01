@@ -1,4 +1,4 @@
-# Polarion Test Steps Toolkit
+# Polarion Test Steps Toolkit 😊
 
 Fetch test steps from Polarion, generate readable narratives, and detect redundant work items — in one command.
 
