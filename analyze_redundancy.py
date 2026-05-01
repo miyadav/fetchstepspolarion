@@ -3,13 +3,23 @@
 
 import argparse
 import json
+import os
 import re
 import sys
 from difflib import SequenceMatcher
 
-sys.path.insert(0, ".")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from generate_story import _build_paragraph, _clean
 
+# Weights for the combined similarity score
+_W_TEXT = 0.30
+_W_KEYWORD = 0.35
+_W_STEP = 0.35
+
+# Thresholds
+_STEP_MATCH_THRESHOLD = 0.55
+_HIGH_SIMILARITY = 0.40
+_MED_SIMILARITY = 0.30
 
 _STOP_WORDS = frozenset(
     "the a an to and or of in on for is it by with that this from as at be are "
@@ -56,18 +66,20 @@ def _step_similarity(steps_a, steps_b, verbose=False, label=""):
     norms_a = [_normalize(_clean(s.get("step", ""))) for s in steps_a]
     norms_b = [_normalize(_clean(s.get("step", ""))) for s in steps_b]
     matched_pairs = []
+    used_b = set()
     for idx_a, na in enumerate(norms_a):
         if not na:
             continue
         best_ratio, best_idx = 0, -1
         for idx_b, nb in enumerate(norms_b):
-            if not nb:
+            if not nb or idx_b in used_b:
                 continue
             r = SequenceMatcher(None, na, nb).ratio()
             if r > best_ratio:
                 best_ratio, best_idx = r, idx_b
-        if best_ratio > 0.55:
+        if best_ratio > _STEP_MATCH_THRESHOLD:
             matched_pairs.append((idx_a, best_idx, best_ratio))
+            used_b.add(best_idx)
             _log(f"           step {idx_a+1} -> step {best_idx+1}  sim={best_ratio:.0%}", verbose)
     valid_a = [x for x in norms_a if x]
     coverage = len(matched_pairs) / len(valid_a) if valid_a else 0
@@ -91,6 +103,8 @@ def analyze_redundancy(data, similarity_threshold=0.25, verbose=False):
 
     _log("  Phase 1: Building normalized paragraphs and keywords ...", verbose)
     for wid, info in data.items():
+        if wid.startswith("_"):
+            continue
         steps = info.get("steps", [])
         if not steps:
             _log(f"    {wid}: 0 steps — skipped", verbose)
@@ -115,8 +129,7 @@ def analyze_redundancy(data, similarity_threshold=0.25, verbose=False):
             text_sim = SequenceMatcher(None, paragraphs[w1], paragraphs[w2]).ratio()
             kw_sim = _jaccard(keywords[w1], keywords[w2])
 
-            # Skip pairs that can't reach threshold even with perfect step match
-            if 0.30 * text_sim + 0.35 * kw_sim + 0.35 * 1.0 < similarity_threshold:
+            if _W_TEXT * text_sim + _W_KEYWORD * kw_sim + _W_STEP * 1.0 < similarity_threshold:
                 continue
 
             steps_a = data[w1].get("steps", [])
@@ -129,7 +142,7 @@ def analyze_redundancy(data, similarity_threshold=0.25, verbose=False):
             m_ab, c_ab, pairs_ab = _step_similarity(steps_a, steps_b, verbose=show_detail)
             m_ba, c_ba, pairs_ba = _step_similarity(steps_b, steps_a)
             step_sim = max(c_ab, c_ba)
-            combined = 0.30 * text_sim + 0.35 * kw_sim + 0.35 * step_sim
+            combined = _W_TEXT * text_sim + _W_KEYWORD * kw_sim + _W_STEP * step_sim
 
             if show_detail:
                 _log(f"         step_sim={step_sim:.1%}  combined={combined:.1%}"
@@ -138,10 +151,10 @@ def analyze_redundancy(data, similarity_threshold=0.25, verbose=False):
             if combined >= similarity_threshold:
                 if c_ab >= c_ba:
                     matched_steps = pairs_ab
-                    direction = f"{w1} -> {w2}"
+                    src_wid, dst_wid = w1, w2
                 else:
                     matched_steps = pairs_ba
-                    direction = f"{w2} -> {w1}"
+                    src_wid, dst_wid = w2, w1
                 pairs.append({
                     "w1": w1, "w2": w2,
                     "combined": combined,
@@ -152,7 +165,8 @@ def analyze_redundancy(data, similarity_threshold=0.25, verbose=False):
                     "steps_a": len(steps_a),
                     "steps_b": len(steps_b),
                     "matched_steps": matched_steps,
-                    "direction": direction,
+                    "src_wid": src_wid,
+                    "dst_wid": dst_wid,
                 })
     pairs.sort(key=lambda x: -x["combined"])
 
@@ -189,7 +203,7 @@ def analyze_redundancy(data, similarity_threshold=0.25, verbose=False):
 
     _log(f"\n  Phase 4: Generating report ...", verbose)
 
-    HIGH, MED = 0.40, 0.30
+    HIGH, MED = _HIGH_SIMILARITY, _MED_SIMILARITY
 
     lines = []
     lines.append("# Test Steps Redundancy Analysis Report")
@@ -213,7 +227,7 @@ def analyze_redundancy(data, similarity_threshold=0.25, verbose=False):
     lines.append("| Keyword overlap | 35% | Jaccard similarity of domain keywords (stop-words removed) |")
     lines.append("| Step-level match | 35% | Fraction of steps in the smaller item that align (>55% match) to a step in the larger item |")
     lines.append("")
-    lines.append("**Combined = 0.30 x Text + 0.35 x Keyword + 0.35 x Step-match**")
+    lines.append(f"**Combined = {_W_TEXT} x Text + {_W_KEYWORD} x Keyword + {_W_STEP} x Step-match**")
     lines.append("")
     lines.append("#### Interpreting a ~50% combined score")
     lines.append("")
@@ -285,11 +299,9 @@ def analyze_redundancy(data, similarity_threshold=0.25, verbose=False):
         lines.append("")
 
         if p["matched_steps"]:
-            src_wid = p["direction"].split(" -> ")[0]
-            dst_wid = p["direction"].split(" -> ")[1]
-            src_steps = data[src_wid].get("steps", [])
-            dst_steps = data[dst_wid].get("steps", [])
-            lines.append(f"**Matched steps ({src_wid} -> {dst_wid}):**")
+            src_steps = data[p["src_wid"]].get("steps", [])
+            dst_steps = data[p["dst_wid"]].get("steps", [])
+            lines.append(f"**Matched steps ({p['src_wid']} -> {p['dst_wid']}):**")
             lines.append("")
             for idx_a, idx_b, ratio in p["matched_steps"]:
                 sa = _clean(src_steps[idx_a].get("step", ""))[:80]
@@ -349,8 +361,15 @@ def main():
     parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed comparison progress")
     args = parser.parse_args()
 
-    with open(args.input) as f:
-        data = json.load(f)
+    try:
+        with open(args.input) as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        print(f"Error: file not found: {args.input}", file=sys.stderr)
+        sys.exit(1)
+    except json.JSONDecodeError as e:
+        print(f"Error: invalid JSON in {args.input}: {e}", file=sys.stderr)
+        sys.exit(1)
 
     report = analyze_redundancy(data, args.threshold, verbose=args.verbose)
 
